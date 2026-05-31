@@ -11,6 +11,10 @@ metadata is loaded from [[https://models.dev][models.dev]] and applied
 as gptel model properties such as context window, cost, capabilities,
 MIME types, and knowledge cutoff.
 
+Refreshes preserve existing gptel configuration: existing backend models
+stay in place, newly fetched models are appended, and models.dev metadata
+only fills missing model properties without replacing existing ones.
+
 This is a blind convenience layer: it imports model IDs only. It does
 not verify cost, context length, tool support, release date, deprecation
 state, or provider policy. Check provider documentation before using a
@@ -104,7 +108,7 @@ gateway backends, configure the models.dev providers explicitly:
 
 Providers are tried in order for each model. The special provider =all=
 searches every models.dev provider and uses the first matching model
-metadata.
+metadata. Existing model properties always win over models.dev values.
 
 ** Options
 - =gptel-model-updater-backends=: backend variables or backend specs to

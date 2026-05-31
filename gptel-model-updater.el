@@ -483,6 +483,14 @@ maximum model count is applied."
     backend-name)
    backend-name))
 
+(defun gptel-model-updater--merge-models-preserving-existing (old-models new-models)
+  "Return OLD-MODELS with models from NEW-MODELS appended when missing."
+  (let ((models (copy-sequence old-models)))
+    (dolist (model new-models)
+      (unless (memq model models)
+        (setq models (append models (list model)))))
+    models))
+
 (defun gptel-model-updater--pick-backend-model (&optional model-list)
   "Pick an available backend/model.
 When MODEL-LIST is non-nil, prefer models in that order.  Otherwise, pick
@@ -679,23 +687,27 @@ DONE-CALLBACK is called after this backend update finishes."
            (unwind-protect
                (if (not success)
                    (message "GPTel-Model-Updater Error: %s (%s)" backend-name error-msg)
-                 (let* ((parsed-models (gptel-model-updater--parse-models raw-data provider))
-                        (new-models (gptel-model-updater--prepare-models
-                                     parsed-models
-                                     (gptel-model-updater--effective-model-list model-list)
-                                     backend-name)))
-                   (if (not new-models)
-                       (message "GPTel-Model-Updater: No models found for %s" backend-name)
-                     (gptel-model-updater-metadata-apply new-models backend provider)
-                     (setf (gptel-backend-models backend) new-models)
-                     (message "GPTel-Model-Updater: Updated %s with %d models%s"
-                              backend-name
-                              (length new-models)
-                              (if (= (length new-models) (length parsed-models))
-                                  ""
-                                (format " from %d fetched models" (length parsed-models))))
-                     (run-hook-with-args 'gptel-model-updater-after-update-hook
-                                         backend-name backend new-models))))
+                (let* ((parsed-models (gptel-model-updater--parse-models raw-data provider))
+                       (new-models (gptel-model-updater--prepare-models
+                                    parsed-models
+                                    (gptel-model-updater--effective-model-list model-list)
+                                    backend-name))
+                       (merged-models
+                        (gptel-model-updater--merge-models-preserving-existing
+                         (gptel-backend-models backend)
+                         new-models)))
+                  (if (not new-models)
+                      (message "GPTel-Model-Updater: No models found for %s" backend-name)
+                    (gptel-model-updater-metadata-apply merged-models backend provider)
+                    (setf (gptel-backend-models backend) merged-models)
+                    (message "GPTel-Model-Updater: Updated %s with %d models%s"
+                             backend-name
+                             (length merged-models)
+                             (if (= (length new-models) (length parsed-models))
+                                 ""
+                               (format " from %d fetched models" (length parsed-models))))
+                    (run-hook-with-args 'gptel-model-updater-after-update-hook
+                                        backend-name backend merged-models))))
              (when done-callback
                (funcall done-callback)))))))))
 

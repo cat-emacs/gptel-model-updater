@@ -298,6 +298,15 @@ When PROVIDER-KEY is `all', search all providers in metadata order."
                  plist :cutoff-date (alist-get 'knowledge model-entry)))
     plist))
 
+(defun gptel-model-updater-metadata--merge-missing (old-plist new-plist)
+  "Return OLD-PLIST with keys from NEW-PLIST added when missing."
+  (let ((plist (copy-sequence old-plist)))
+    (while new-plist
+      (unless (plist-member plist (car new-plist))
+        (setq plist (append plist (list (car new-plist) (cadr new-plist)))))
+      (setq new-plist (cddr new-plist)))
+    plist))
+
 (defun gptel-model-updater-metadata-apply (models backend provider-type)
   "Apply models.dev properties to MODELS for BACKEND and PROVIDER-TYPE.
 Return MODELS unchanged when no matching metadata is available."
@@ -313,7 +322,10 @@ Return MODELS unchanged when no matching metadata is available."
                         (model-entry (cdr match))
                         (plist (gptel-model-updater-metadata--model-plist
                                 model-entry matched-provider-key provider-type backend)))
-              (setf (symbol-plist model) plist)
+              (setf (symbol-plist model)
+                    (gptel-model-updater-metadata--merge-missing
+                     (symbol-plist model)
+                     plist))
               (throw 'found t)))))))
   models)
 

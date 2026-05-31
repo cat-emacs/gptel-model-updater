@@ -58,6 +58,13 @@
              "Ollama")
             '(openai/gpt-4o local/llama google/gemini)))))
 
+(ert-deftest gptel-model-updater-merge-models-preserves-existing ()
+  "Fetched models are appended without replacing configured models."
+  (should (equal (gptel-model-updater--merge-models-preserving-existing
+                  '(custom-model gpt-4o)
+                  '(gpt-4o gpt-4.1))
+                 '(custom-model gpt-4o gpt-4.1))))
+
 (ert-deftest gptel-model-updater-metadata-openai-plist ()
   "models.dev metadata maps to gptel model properties."
   (let* ((backend (gptel-make-openai "metadata-openai-test"
@@ -90,6 +97,40 @@
                      :input-cost 2.5
                      :output-cost 10
                      :cutoff-date "2023-10")))))
+
+(ert-deftest gptel-model-updater-metadata-preserves-existing-properties ()
+  "models.dev metadata only fills missing gptel model properties."
+  (let* ((backend (gptel-make-openai "metadata-preserve-test"
+                    :host "api.openai.com"
+                    :models '()))
+         (metadata
+          '((openai
+             (models
+              (gpt-4o
+               (name . "GPT-4o from metadata")
+               (tool_call . t)
+               (modalities . ((input . ["text" "image"])
+                              (output . ["text"])))
+               (limit . ((context . 128000)))
+               (cost . ((input . 2.5)
+                        (output . 10))))))))
+         (gptel-model-updater-metadata--cache metadata)
+         (gptel-model-updater-metadata--cache-url gptel-model-updater-model-metadata-url))
+    (unwind-protect
+        (progn
+          (setf (symbol-plist 'gpt-4o)
+                '(:description "Existing description"
+                  :context-window 32
+                  :custom-property keep-me))
+          (gptel-model-updater-metadata-apply '(gpt-4o) backend 'openai)
+          (should (equal (get 'gpt-4o :description)
+                         "Existing description"))
+          (should (equal (get 'gpt-4o :context-window) 32))
+          (should (equal (get 'gpt-4o :custom-property) 'keep-me))
+          (should (equal (get 'gpt-4o :input-cost) 2.5))
+          (should (equal (get 'gpt-4o :capabilities)
+                         '(media tool-use responses-api))))
+      (setf (symbol-plist 'gpt-4o) nil))))
 
 (ert-deftest gptel-model-updater-metadata-fetch-respects-curl-setting ()
   "Metadata fetching follows `gptel-use-curl'."
