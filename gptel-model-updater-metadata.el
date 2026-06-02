@@ -25,6 +25,14 @@ When nil, refreshed models are written without additional model properties."
                  string)
   :group 'gptel-model-updater)
 
+(defcustom gptel-model-updater-metadata-overwrite-existing nil
+  "Whether models.dev metadata should replace existing model properties.
+When nil, models.dev metadata only fills missing model properties.  When
+non-nil, matching models.dev keys replace existing values while unrelated
+existing keys are preserved."
+  :type 'boolean
+  :group 'gptel-model-updater)
+
 (defvar gptel-model-updater-timeout)
 
 (defvar gptel-model-updater-backends)
@@ -298,12 +306,15 @@ When PROVIDER-KEY is `all', search all providers in metadata order."
                  plist :cutoff-date (alist-get 'knowledge model-entry)))
     plist))
 
-(defun gptel-model-updater-metadata--merge-missing (old-plist new-plist)
-  "Return OLD-PLIST with keys from NEW-PLIST added when missing."
+(defun gptel-model-updater-metadata--merge (old-plist new-plist)
+  "Return OLD-PLIST merged with NEW-PLIST following user settings."
   (let ((plist (copy-sequence old-plist)))
     (while new-plist
-      (unless (plist-member plist (car new-plist))
-        (setq plist (append plist (list (car new-plist) (cadr new-plist)))))
+      (when (or gptel-model-updater-metadata-overwrite-existing
+                (not (plist-member plist (car new-plist))))
+        (if (plist-member plist (car new-plist))
+            (setf (plist-get plist (car new-plist)) (cadr new-plist))
+          (setq plist (append plist (list (car new-plist) (cadr new-plist))))))
       (setq new-plist (cddr new-plist)))
     plist))
 
@@ -323,7 +334,7 @@ Return MODELS unchanged when no matching metadata is available."
                         (plist (gptel-model-updater-metadata--model-plist
                                 model-entry matched-provider-key provider-type backend)))
               (setf (symbol-plist model)
-                    (gptel-model-updater-metadata--merge-missing
+                    (gptel-model-updater-metadata--merge
                      (symbol-plist model)
                      plist))
               (throw 'found t)))))))

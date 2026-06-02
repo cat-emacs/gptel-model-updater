@@ -132,6 +132,41 @@
                          '(media tool-use responses-api))))
       (setf (symbol-plist 'gpt-4o) nil))))
 
+(ert-deftest gptel-model-updater-metadata-overwrites-when-enabled ()
+  "models.dev metadata can replace existing model properties on request."
+  (let* ((backend (gptel-make-openai "metadata-overwrite-test"
+                    :host "api.openai.com"
+                    :models '()))
+         (metadata
+          '((openai
+             (models
+              (gpt-4o
+               (name . "GPT-4o from metadata")
+               (tool_call . t)
+               (modalities . ((input . ["text" "image"])
+                              (output . ["text"])))
+               (limit . ((context . 128000)))
+               (cost . ((input . 2.5)
+                        (output . 10))))))))
+         (gptel-model-updater-metadata--cache metadata)
+         (gptel-model-updater-metadata--cache-url gptel-model-updater-model-metadata-url)
+         (gptel-model-updater-metadata-overwrite-existing t))
+    (unwind-protect
+        (progn
+          (setf (symbol-plist 'gpt-4o)
+                '(:description "Existing description"
+                  :context-window 32
+                  :custom-property keep-me))
+          (gptel-model-updater-metadata-apply '(gpt-4o) backend 'openai)
+          (should (equal (get 'gpt-4o :description)
+                         "GPT-4o from metadata"))
+          (should (equal (get 'gpt-4o :context-window) 128))
+          (should (equal (get 'gpt-4o :custom-property) 'keep-me))
+          (should (equal (get 'gpt-4o :input-cost) 2.5))
+          (should (equal (get 'gpt-4o :capabilities)
+                         '(media tool-use responses-api))))
+      (setf (symbol-plist 'gpt-4o) nil))))
+
 (ert-deftest gptel-model-updater-metadata-fetch-respects-curl-setting ()
   "Metadata fetching follows `gptel-use-curl'."
   (cl-letf (((symbol-function 'gptel-model-updater-metadata--fetch-with-curl)

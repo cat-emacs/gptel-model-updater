@@ -13,7 +13,7 @@ MIME types, and knowledge cutoff.
 
 Refreshes preserve existing gptel configuration: existing backend models
 stay in place, newly fetched models are appended, and models.dev metadata
-only fills missing model properties without replacing existing ones.
+fills missing model properties by default.
 
 This is a blind convenience layer: it imports model IDs only. It does
 not verify cost, context length, tool support, release date, deprecation
@@ -108,7 +108,9 @@ gateway backends, configure the models.dev providers explicitly:
 
 Providers are tried in order for each model. The special provider =all=
 searches every models.dev provider and uses the first matching model
-metadata. Existing model properties always win over models.dev values.
+metadata. Existing model properties win over models.dev values by default.
+Set =gptel-model-updater-metadata-overwrite-existing= to non-nil to let
+models.dev replace existing values for matching property keys.
 
 ** Options
 - =gptel-model-updater-backends=: backend variables or backend specs to
@@ -123,6 +125,9 @@ metadata. Existing model properties always win over models.dev values.
   rules.
 - =gptel-model-updater-model-metadata-url=: models.dev metadata URL; set
   to nil to disable model properties.
+- =gptel-model-updater-metadata-overwrite-existing=: whether models.dev
+  metadata replaces existing model property values; default nil only fills
+  missing values.
 - =gptel-model-updater-sort-models=: sort models alphabetically; default
   nil keeps provider order.
 - =gptel-model-updater-timeout=: curl timeout in seconds.
