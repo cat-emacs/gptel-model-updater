@@ -323,6 +323,47 @@
       (setq gptel-model-updater-ui-annotation-column-widths old-widths)
       (setf (symbol-plist model) nil))))
 
+(ert-deftest gptel-model-updater-select-all-targets-interactive-selects-one-target ()
+  "Interactive selection updates only the chosen external target."
+  (let* ((target-a '(test-backend-a test-model-a "Target A"))
+         (target-b '(test-backend-b test-model-b "Target B"))
+         (gptel-model-updater-external-targets (list target-a target-b))
+         (selected nil))
+    (cl-letf (((symbol-function 'gptel-model-updater--read-target)
+               (lambda () target-b))
+              ((symbol-function 'gptel-model-updater-select-default-target)
+               (lambda (&rest _args) (push 'gptel selected)))
+              ((symbol-function 'gptel-model-updater--select-external-target)
+               (lambda (target &rest _args) (push target selected))))
+      (gptel-model-updater-select-all-targets t t)
+      (should (equal selected (list target-b))))))
+
+(ert-deftest gptel-model-updater-read-target-lists-default-and-external-targets ()
+  "Target completion includes GPTel and every configured external target."
+  (let* ((target-a '(test-backend-a test-model-a "Target A"))
+         (target-b '(test-backend-b test-model-b "Target B"))
+         (gptel-model-updater-external-targets (list target-a target-b))
+         (candidates nil))
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt collection &rest _args)
+                 (setq candidates collection)
+                 "Target B")))
+      (should (equal (gptel-model-updater--read-target) target-b))
+      (should (equal (mapcar #'car candidates)
+                     '("GPTel" "Target A" "Target B"))))))
+
+(ert-deftest gptel-model-updater-select-all-targets-noninteractive-selects-all ()
+  "Non-interactive selection continues to update every target."
+  (let ((gptel-model-updater-external-targets
+         '((test-backend-a test-model-a "Target A")))
+        (selected nil))
+    (cl-letf (((symbol-function 'gptel-model-updater-select-default-target)
+               (lambda (&rest _args) (push 'gptel selected)))
+              ((symbol-function 'gptel-model-updater-select-external-targets)
+               (lambda (&rest _args) (push 'external selected))))
+      (gptel-model-updater-select-all-targets t nil)
+      (should (equal selected '(external gptel))))))
+
 (ert-deftest gptel-model-updater-update-all-runs-after-hook ()
   "Update-all hook runs once after backend updates are scheduled."
   (let ((gptel-model-updater--test-hook-calls 0)

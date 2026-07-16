@@ -140,7 +140,8 @@ models.dev replace existing values for matching property keys.
 - =gptel-model-updater-update-backend=
 - =gptel-model-updater-update-all=
 - =gptel-model-updater-select-all-targets= --- with =C-u= prefix,
-  interactively select each target
+  first select one configured target, then interactively select its backend
+  and model
 - =gptel-model-updater-select-default-target=
 - =gptel-model-updater-select-external-targets=
 

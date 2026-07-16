@@ -585,21 +585,40 @@ PROMPT-PREFIX is prepended to completion prompts."
                  gptel-model-updater-external-targets))
    "\n"))
 
+(defun gptel-model-updater--read-target ()
+  "Read one configured target interactively."
+  (let* ((targets
+          (cons '("GPTel" . gptel)
+                (mapcar (lambda (target)
+                          (cons (gptel-model-updater--target-label target)
+                                target))
+                        gptel-model-updater-external-targets)))
+         (label (completing-read "Target: " targets nil t)))
+    (cdr (assoc label targets))))
+
+(defun gptel-model-updater--select-external-target
+    (target interactivep &optional model-list)
+  "Set external TARGET.
+When INTERACTIVEP is non-nil, read its backend and model with completion;
+otherwise select them from MODEL-LIST or randomly."
+  (pcase-let ((`(,backend-variable ,model-variable . ,_) target))
+    (when (and (symbolp backend-variable) (symbolp model-variable))
+      (gptel-model-updater--set-choice
+       backend-variable model-variable
+       (if interactivep
+           (gptel-model-updater--read-backend-model
+            (format "%s " (gptel-model-updater--target-label target)))
+         (gptel-model-updater--pick-backend-model
+          (or (gptel-model-updater--target-models target)
+              model-list)))))))
+
 (defun gptel-model-updater--select-external-targets (interactivep &optional model-list)
   "Set configured external targets.
 When INTERACTIVEP is non-nil, read each target with completion;
 otherwise select each target from MODEL-LIST or randomly."
   (dolist (target gptel-model-updater-external-targets)
-    (pcase-let ((`(,backend-variable ,model-variable . ,_) target))
-      (when (and (symbolp backend-variable) (symbolp model-variable))
-        (gptel-model-updater--set-choice
-         backend-variable model-variable
-         (if interactivep
-             (gptel-model-updater--read-backend-model
-              (format "%s " (gptel-model-updater--target-label target)))
-           (gptel-model-updater--pick-backend-model
-            (or (gptel-model-updater--target-models target)
-                model-list))))))))
+    (gptel-model-updater--select-external-target
+     target interactivep model-list)))
 
 ;;;###autoload
 (defun gptel-model-updater-select-default-target (&optional quiet interactivep model-list)
@@ -647,17 +666,29 @@ When QUIET is non-nil, do not print the final selections."
 The global `gptel-backend' and `gptel-model' variables are selected first.
 Then `gptel-model-updater-external-targets' are selected.  MODEL-LIST
 overrides `gptel-model-updater-models'.  When QUIET is non-nil, do not print
-selection messages.  When INTERACTIVEP is non-nil, read each target with
-completion.
+selection messages.  When INTERACTIVEP is non-nil, select one target, then
+read its backend and model with completion.
 
-With \\[universal-argument], interactively select each target."
+With \\[universal-argument], interactively select which target to update."
   (interactive (list nil current-prefix-arg))
   (setq model-list (gptel-model-updater--effective-model-list model-list))
-  (gptel-model-updater-select-default-target t interactivep model-list)
-  (gptel-model-updater-select-external-targets t interactivep model-list)
-  (unless quiet
-    (message "GPTel targets set\n%s"
-             (gptel-model-updater--format-all-targets))))
+  (if interactivep
+      (let ((target (if gptel-model-updater-external-targets
+                        (gptel-model-updater--read-target)
+                      'gptel)))
+        (if (eq target 'gptel)
+            (gptel-model-updater-select-default-target t t model-list)
+          (gptel-model-updater--select-external-target target t model-list))
+        (unless quiet
+          (message "GPTel target set\n%s"
+                   (if (eq target 'gptel)
+                       (gptel-model-updater--format-default-target)
+                     (gptel-model-updater--format-external-target target)))))
+    (gptel-model-updater-select-default-target t nil model-list)
+    (gptel-model-updater-select-external-targets t nil model-list)
+    (unless quiet
+      (message "GPTel targets set\n%s"
+               (gptel-model-updater--format-all-targets)))))
 
 ;;;###autoload
 (defun gptel-model-updater-update-backend
