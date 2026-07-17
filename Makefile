@@ -17,11 +17,15 @@ help:
 	@echo "  test          - Run ERT tests"
 	@echo "  clean         - Remove .elc files"
 
+# The melpa transient requires compat 31 for `static-when'.  Emacs ships a
+# built-in compat that satisfies a version-less `package-install', so install
+# compat from its archive descriptor to force the newer version; otherwise
+# transient byte-compiles without the macro and fails to load.
 install-deps:
 	$(BATCH) $(ARCHIVES) \
 	  --eval "(package-refresh-contents)" \
 	  --eval "(package-install 'package-lint)" \
-	  --eval "(package-install 'compat)" \
+	  --eval "(package-install (cadr (assq 'compat package-archive-contents)))" \
 	  --eval "(package-install 'transient)" \
 	  --eval "(package-install 'gptel)"
 
