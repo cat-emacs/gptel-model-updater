@@ -144,6 +144,9 @@ models.dev replace existing values for matching property keys.
   and model
 - =gptel-model-updater-select-default-target=
 - =gptel-model-updater-select-external-targets=
+- =gptel-model-updater-transient= (alias =gptel-model-updater-menu=)
+  --- a transient popup to select each target's backend/model, run
+  updates, and edit global and per-backend model filters
 
 ** Providers
 - OpenAI-compatible APIs

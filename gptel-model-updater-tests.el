@@ -12,6 +12,7 @@
 
 (require 'ert)
 (require 'gptel-model-updater)
+(require 'gptel-model-updater-transient)
 
 (ert-deftest gptel-model-updater-parse-models-keeps-provider-order ()
   "Model parsing preserves provider order and removes duplicates."
@@ -418,6 +419,138 @@
             (should (eq (car events) 'all-hook)))
         (makunbound 'gptel-model-updater--test-backend-a)
         (makunbound 'gptel-model-updater--test-backend-b)))))
+
+;;; Transient dispatcher
+
+(ert-deftest gptel-model-updater-transient-prefix-defined ()
+  "The transient prefix command and its alias are defined."
+  (should (commandp 'gptel-model-updater-transient))
+  (should (commandp 'gptel-model-updater-menu)))
+
+(ert-deftest gptel-model-updater-set-backend-filter-adds-entry ()
+  "Setting a filter creates a backend entry when none exists."
+  (let ((gptel-model-updater-backend-filters nil))
+    (gptel-model-updater--set-backend-filter "Ollama" :include "local/")
+    (should (equal gptel-model-updater-backend-filters
+                   '(("Ollama" :include "local/"))))))
+
+(ert-deftest gptel-model-updater-set-backend-filter-updates-key ()
+  "Setting an existing key replaces its value, keeping other keys."
+  (let ((gptel-model-updater-backend-filters
+         '(("Ollama" :include "local/" :max 5))))
+    (gptel-model-updater--set-backend-filter "Ollama" :max 10)
+    (should (equal (cdr (assoc "Ollama" gptel-model-updater-backend-filters))
+                   '(:include "local/" :max 10)))))
+
+(ert-deftest gptel-model-updater-set-backend-filter-removes-key-on-nil ()
+  "Setting a key to nil removes only that key."
+  (let ((gptel-model-updater-backend-filters
+         '(("Ollama" :include "local/" :max 5))))
+    (gptel-model-updater--set-backend-filter "Ollama" :include nil)
+    (should (equal (cdr (assoc "Ollama" gptel-model-updater-backend-filters))
+                   '(:max 5)))))
+
+(ert-deftest gptel-model-updater-set-backend-filter-removes-empty-entry ()
+  "Clearing the last key removes the whole backend entry."
+  (let ((gptel-model-updater-backend-filters
+         '(("Ollama" :include "local/")
+           ("OpenAI" :max 3))))
+    (gptel-model-updater--set-backend-filter "Ollama" :include nil)
+    (should (equal gptel-model-updater-backend-filters
+                   '(("OpenAI" :max 3))))))
+
+(ert-deftest gptel-model-updater-transient-toggle-flips-value ()
+  "Toggling a boolean variable returns and stores the negated value."
+  (let ((gptel-model-updater-sort-models nil))
+    (should (eq (gptel-model-updater--transient-toggle
+                 'gptel-model-updater-sort-models)
+                t))
+    (should (eq gptel-model-updater-sort-models t))
+    (should (eq (gptel-model-updater--transient-toggle
+                 'gptel-model-updater-sort-models)
+                nil))
+    (should (eq gptel-model-updater-sort-models nil))))
+
+(ert-deftest gptel-model-updater-transient-read-regexp-blank-is-nil ()
+  "An empty regexp input clears the value to nil."
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "  ")))
+    (should (null (gptel-model-updater--transient-read-regexp "P: " "old"))))
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "openai/")))
+    (should (equal (gptel-model-updater--transient-read-regexp "P: " nil)
+                   "openai/"))))
+
+(ert-deftest gptel-model-updater-transient-read-max-parses-integer ()
+  "Reading the max count parses positive integers and clears otherwise."
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "50")))
+    (should (equal (gptel-model-updater--transient-read-max "P: " nil) 50)))
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "")))
+    (should (null (gptel-model-updater--transient-read-max "P: " 10))))
+  (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "0")))
+    (should (null (gptel-model-updater--transient-read-max "P: " nil)))))
+
+(ert-deftest gptel-model-updater-transient-targets-lists-default-and-external ()
+  "Target rows include the default target and each external target."
+  (let ((gptel-model-updater-external-targets
+         '((backend-var model-var "Fast")
+           (backend-var2 model-var2 "Vision"))))
+    (let ((rows (gptel-model-updater--transient-targets)))
+      (should (equal (car (nth 0 rows)) "g"))
+      (should (eq (cdr (nth 0 rows)) 'gptel))
+      (should (equal (car (nth 1 rows)) "1"))
+      (should (equal (gptel-model-updater--target-label (cdr (nth 1 rows)))
+                     "Fast"))
+      (should (equal (car (nth 2 rows)) "2")))))
+
+(ert-deftest gptel-model-updater-transient-target-description-reflects-state ()
+  "Target descriptions reflect the current variable values."
+  (defvar gptel-model-updater--test-tr-backend nil)
+  (defvar gptel-model-updater--test-tr-model nil)
+  (let* ((backend (gptel-make-openai "transient-desc-test" :models '(gpt-4o)))
+         (gptel-model-updater--test-tr-backend backend)
+         (gptel-model-updater--test-tr-model 'gpt-4o)
+         (target '(gptel-model-updater--test-tr-backend
+                   gptel-model-updater--test-tr-model "Fast")))
+    (should (equal (gptel-model-updater--transient-target-description target)
+                   "Fast: backend=transient-desc-test model=gpt-4o"))))
+
+(ert-deftest gptel-model-updater-transient-backend-row-description ()
+  "Per-backend rows show effective include/exclude/max with global fallback."
+  (let ((gptel-model-updater-include-model-regexp "global/")
+        (gptel-model-updater-exclude-model-regexp nil)
+        (gptel-model-updater-max-models 200)
+        (gptel-model-updater-backend-filters
+         '(("Ollama" :include "local/" :max 5))))
+    ;; Ollama overrides include and max; exclude falls back to global (nil).
+    (should (equal (gptel-model-updater--transient-backend-row-description
+                    "Ollama")
+                   "Ollama  include=local/ exclude=- max=5"))
+    ;; OpenAI has no override, so include and max fall back to global values.
+    (should (equal (gptel-model-updater--transient-backend-row-description
+                    "OpenAI")
+                   "OpenAI  include=global/ exclude=- max=200"))))
+
+(ert-deftest gptel-model-updater-transient-set-current-filter ()
+  "Setting the current per-backend filter writes through to the alist."
+  (let ((gptel-model-updater-backend-filters nil)
+        (gptel-model-updater--transient-backend "Ollama"))
+    (gptel-model-updater--transient-set-current-filter :max 7)
+    (should (equal (gptel-model-updater--backend-filter-value "Ollama" :max)
+                   7)))
+  (let ((gptel-model-updater-backend-filters '(("Ollama" :max 7)))
+        (gptel-model-updater--transient-backend nil))
+    (gptel-model-updater--transient-set-current-filter :max 9)
+    (should (equal gptel-model-updater-backend-filters '(("Ollama" :max 7))))))
+
+(ert-deftest gptel-model-updater-backend-filter-value-reads-effective ()
+  "Reading a backend filter value returns the stored plist value."
+  (let ((gptel-model-updater-backend-filters
+         '(("Ollama" :include "local/" :max 5))))
+    (should (equal (gptel-model-updater--backend-filter-value "Ollama" :include)
+                   "local/"))
+    (should (equal (gptel-model-updater--backend-filter-value "Ollama" :max)
+                   5))
+    (should (null (gptel-model-updater--backend-filter-value "Ollama" :exclude)))
+    (should (null (gptel-model-updater--backend-filter-value "Missing" :max)))))
 
 (provide 'gptel-model-updater-tests)
 ;;; gptel-model-updater-tests.el ends here
