@@ -17,6 +17,7 @@ Full dispatcher covering three concerns:
    `gptel-model-updater-external-targets`.
 2. **Update** — `update-all`, `update-backend`, `select-all-targets`.
 3. **Options** — infixes for the tunable defcustoms.
+4. **Filters** — a sub-transient for global and per-backend filter rules.
 
 ## New file
 
@@ -41,10 +42,10 @@ suffix per target.
 GPTel Model Updater
 
 Targets                                Update             Options
- g GPTel   backend=OpenAI model=gpt-4o  u Update all       -s Sort models    (on/off)
- 1 Fast    backend=... model=...        b Update backend   -m Max models     (200)
- 2 Vision  backend=... model=...        a Select all       -o Overwrite meta (on/off)
-                                        q Quit
+ g GPTel   backend=OpenAI model=gpt-4o  u Update all       -o Overwrite meta (on/off)
+ 1 Fast    backend=... model=...        b Update backend
+ 2 Vision  backend=... model=...        a Select all       Filters
+                                        q Quit               f Filters...
 ```
 
 ### Targets group
@@ -71,9 +72,42 @@ Targets                                Update             Options
 Infixes read the current defcustom value and `setq` it globally when
 changed (persists for the session, matches a settings popup):
 
-- `-s` toggle `gptel-model-updater-sort-models`
-- `-m` set `gptel-model-updater-max-models` (integer or nil)
 - `-o` toggle `gptel-model-updater-metadata-overwrite-existing`
+
+### Filters sub-transient (`f`)
+
+A dedicated sub-transient, `gptel-model-updater-transient-filters`,
+reached with `f` from the main menu. It holds the global filter infixes
+plus one row per managed backend.
+
+Global infixes (read current value, empty input clears to nil, `setq`
+the defcustom):
+
+- `-s` toggle `gptel-model-updater-sort-models`
+- `-i` set `gptel-model-updater-include-model-regexp` (regexp or nil)
+- `-x` set `gptel-model-updater-exclude-model-regexp` (regexp or nil)
+- `-m` set `gptel-model-updater-max-models` (integer or nil)
+
+Per-backend rows: one row per backend in `gptel-model-updater-backends`,
+keyed `1`, `2`, ..., each showing that backend's current effective
+include/exclude/max. Selecting a row opens a nested per-backend
+sub-transient.
+
+### Per-backend filter sub-transient
+
+`gptel-model-updater-transient-backend-filter`, generated for a chosen
+backend name. Infixes write into that backend's plist inside the
+`gptel-model-updater-backend-filters` alist (creating the entry if
+missing, removing a key when cleared to nil):
+
+- `-i` `:include` regexp
+- `-x` `:exclude` regexp
+- `-m` `:max` integer
+
+A helper `gptel-model-updater--set-backend-filter (name key value)`
+updates the alist and `setq`s `gptel-model-updater-backend-filters`.
+Omitted/nil keys fall back to the global values, matching existing
+semantics.
 
 ## Per-target selection mechanism
 
@@ -99,6 +133,8 @@ Add tests to `gptel-model-updater-tests.el`:
    `gptel-backend`/`gptel-model` and external target variables, assert
    the formatted strings).
 3. Option infix setter functions set the corresponding defcustoms.
+4. `gptel-model-updater--set-backend-filter` adds, updates, and removes
+   keys in `gptel-model-updater-backend-filters` correctly.
 
 Transient key interaction is not unit-tested; helper functions are.
 
@@ -106,5 +142,4 @@ Transient key interaction is not unit-tested; helper functions are.
 
 - No change to existing interactive commands.
 - No new persistence of option state beyond the existing defcustoms.
-- No filter-regexp infixes (string regexps are awkward in a popup and
-  rarely toggled mid-session).
+- No timeout / hook infixes (rarely changed mid-session).
