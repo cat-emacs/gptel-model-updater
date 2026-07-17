@@ -21,6 +21,8 @@ install-deps:
 	$(BATCH) $(ARCHIVES) \
 	  --eval "(package-refresh-contents)" \
 	  --eval "(package-install 'package-lint)" \
+	  --eval "(package-install 'compat)" \
+	  --eval "(package-install 'transient)" \
 	  --eval "(package-install 'gptel)"
 
 lint:
