@@ -559,31 +559,89 @@ PROMPT-PREFIX is prepended to completion prompts."
   "Return display label for external TARGET."
   (or (nth 2 target) (symbol-name (car target))))
 
+(defun gptel-model-updater--default-target-fields ()
+  "Return display fields for the default GPTel target."
+  (list "GPTel"
+        (and (boundp 'gptel-backend) gptel-backend
+             (gptel-backend-name gptel-backend))
+        (and (boundp 'gptel-model) gptel-model)))
+
+(defun gptel-model-updater--external-target-fields (target)
+  "Return display fields for external TARGET."
+  (pcase-let ((`(,backend-variable ,model-variable . ,_) target))
+    (list (gptel-model-updater--target-label target)
+          (and (boundp backend-variable)
+               (symbol-value backend-variable)
+               (gptel-backend-name (symbol-value backend-variable)))
+          (and (boundp model-variable)
+               (symbol-value model-variable)))))
+
+(defun gptel-model-updater--next-tab-stop (column)
+  "Return the tab stop following COLUMN."
+  (* (1+ (/ column 8)) 8))
+
+(defun gptel-model-updater--tabs-to-column (column target-column)
+  "Return tabs advancing from COLUMN to TARGET-COLUMN."
+  (let ((tabs ""))
+    (while (< column target-column)
+      (setq tabs (concat tabs "\t")
+            column (gptel-model-updater--next-tab-stop column)))
+    tabs))
+
+(defun gptel-model-updater--format-target-fields (targets)
+  "Format TARGETS with tab-aligned backend and model columns.
+Each entry in TARGETS is (LABEL BACKEND MODEL)."
+  (let* ((rows (mapcar (lambda (target)
+                         (list (format "%s:" (nth 0 target))
+                               (format "backend=%s" (nth 1 target))
+                               (format "model=%s" (nth 2 target))))
+                       targets))
+         (backend-column
+          (gptel-model-updater--next-tab-stop
+           (apply #'max (mapcar (lambda (row) (string-width (nth 0 row)))
+                                rows))))
+         (model-column
+          (gptel-model-updater--next-tab-stop
+           (+ backend-column
+              (apply #'max (mapcar (lambda (row) (string-width (nth 1 row)))
+                                   rows))))))
+    (mapconcat
+     (lambda (row)
+       (let ((label (nth 0 row))
+             (backend (nth 1 row))
+             (model (nth 2 row)))
+         (concat label
+                 (gptel-model-updater--tabs-to-column
+                  (string-width label) backend-column)
+                 backend
+                 (gptel-model-updater--tabs-to-column
+                  (+ backend-column (string-width backend)) model-column)
+                 model)))
+     rows
+     "\n")))
+
 (defun gptel-model-updater--format-default-target ()
   "Return a display string for the default GPTel target."
-  (format "GPTel: backend=%s model=%s"
-          (and (boundp 'gptel-backend) gptel-backend
-               (gptel-backend-name gptel-backend))
-          (and (boundp 'gptel-model) gptel-model)))
+  (gptel-model-updater--format-target-fields
+   (list (gptel-model-updater--default-target-fields))))
 
 (defun gptel-model-updater--format-external-target (target)
   "Return a display string for external TARGET."
-  (pcase-let ((`(,backend-variable ,model-variable . ,_) target))
-    (format "%s: backend=%s model=%s"
-            (gptel-model-updater--target-label target)
-            (and (boundp backend-variable)
-                 (symbol-value backend-variable)
-                 (gptel-backend-name (symbol-value backend-variable)))
-            (and (boundp model-variable)
-                 (symbol-value model-variable)))))
+  (gptel-model-updater--format-target-fields
+   (list (gptel-model-updater--external-target-fields target))))
+
+(defun gptel-model-updater--format-external-targets ()
+  "Return a display string for all configured external targets."
+  (gptel-model-updater--format-target-fields
+   (mapcar #'gptel-model-updater--external-target-fields
+           gptel-model-updater-external-targets)))
 
 (defun gptel-model-updater--format-all-targets ()
   "Return a display string for all configured targets."
-  (string-join
-   (cons (gptel-model-updater--format-default-target)
-         (mapcar #'gptel-model-updater--format-external-target
-                 gptel-model-updater-external-targets))
-   "\n"))
+  (gptel-model-updater--format-target-fields
+   (cons (gptel-model-updater--default-target-fields)
+         (mapcar #'gptel-model-updater--external-target-fields
+                 gptel-model-updater-external-targets))))
 
 (defun gptel-model-updater--read-target ()
   "Read one configured target interactively."
@@ -653,12 +711,8 @@ When QUIET is non-nil, do not print the final selections."
   (setq model-list (gptel-model-updater--effective-model-list model-list))
   (gptel-model-updater--select-external-targets interactivep model-list)
   (when (and gptel-model-updater-external-targets (not quiet))
-    (message "GPTel external targets set%s"
-             (mapconcat
-              (lambda (target)
-                (concat "\n" (gptel-model-updater--format-external-target target)))
-              gptel-model-updater-external-targets
-              ""))))
+    (message "GPTel external targets set\n%s"
+             (gptel-model-updater--format-external-targets))))
 
 ;;;###autoload
 (defun gptel-model-updater-select-all-targets (&optional quiet interactivep model-list)

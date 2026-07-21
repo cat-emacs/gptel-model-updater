@@ -511,7 +511,33 @@
          (target '(gptel-model-updater--test-tr-backend
                    gptel-model-updater--test-tr-model "Fast")))
     (should (equal (gptel-model-updater--transient-target-description target)
-                   "Fast: backend=transient-desc-test model=gpt-4o"))))
+                   "Fast:\tbackend=transient-desc-test\tmodel=gpt-4o"))))
+
+(ert-deftest gptel-model-updater-format-all-targets-aligns-with-tabs ()
+  "Target output aligns backend and model fields using tabs."
+  (defvar gptel-model-updater--test-magit-backend nil)
+  (defvar gptel-model-updater--test-magit-model nil)
+  (defvar gptel-model-updater--test-forge-backend nil)
+  (defvar gptel-model-updater--test-forge-model nil)
+  (let* ((gptel-backend
+          (gptel-make-openai "Gemini" :models '(gemini-pro)))
+         (gptel-model 'gemini-pro)
+         (gptel-model-updater--test-magit-backend
+          (gptel-make-openai "OpenRouter" :models '(openai/gpt)))
+         (gptel-model-updater--test-magit-model 'openai/gpt)
+         (gptel-model-updater--test-forge-backend
+          (gptel-make-openai "MLX" :models '(mlx/model)))
+         (gptel-model-updater--test-forge-model 'mlx/model)
+         (gptel-model-updater-external-targets
+          '((gptel-model-updater--test-magit-backend
+             gptel-model-updater--test-magit-model "GPTel-Magit")
+            (gptel-model-updater--test-forge-backend
+             gptel-model-updater--test-forge-model "GPTel-Forge-Prs"))))
+    (should
+     (equal (gptel-model-updater--format-all-targets)
+            (concat "GPTel:\t\t\tbackend=Gemini\t\tmodel=gemini-pro\n"
+                    "GPTel-Magit:\t\tbackend=OpenRouter\tmodel=openai/gpt\n"
+                    "GPTel-Forge-Prs:\tbackend=MLX\t\tmodel=mlx/model")))))
 
 (ert-deftest gptel-model-updater-transient-backend-row-description ()
   "Per-backend rows show effective include/exclude/max with global fallback."
