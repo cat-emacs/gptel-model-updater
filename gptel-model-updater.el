@@ -5,7 +5,7 @@
 ;; Author: pfcdx <github@pfcdx>
 ;; Maintainer: Misaka <chuxubank@qq.com>
 ;; Assisted-by: opencode:deepseek-v4-flash-free
-;; Version: 0.3.0
+;; Version: 0.3.1
 ;; Package-Requires: ((emacs "29.1") (gptel "0.8"))
 ;; Keywords: comm, tools, processes
 ;; URL: https://github.com/chuxubank/gptel-model-updater
@@ -588,14 +588,22 @@ PROMPT-PREFIX is prepended to completion prompts."
             column (gptel-model-updater--next-tab-stop column)))
     tabs))
 
-(defun gptel-model-updater--format-target-fields (targets)
+(defun gptel-model-updater--format-target-fields (targets &optional table)
   "Format TARGETS with tab-aligned backend and model columns.
-Each entry in TARGETS is (LABEL BACKEND MODEL)."
-  (let* ((rows (mapcar (lambda (target)
-                         (list (format "%s:" (nth 0 target))
-                               (format "backend=%s" (nth 1 target))
-                               (format "model=%s" (nth 2 target))))
-                       targets))
+Each entry in TARGETS is (LABEL BACKEND MODEL).  When TABLE is non-nil,
+include a header row and omit punctuation and field prefixes."
+  (let* ((rows
+          (if table
+              (cons '("Target" "Backend" "Model")
+                    (mapcar (lambda (target)
+                              (mapcar (lambda (field) (format "%s" field))
+                                      target))
+                            targets))
+            (mapcar (lambda (target)
+                      (list (format "%s:" (nth 0 target))
+                            (format "backend=%s" (nth 1 target))
+                            (format "model=%s" (nth 2 target))))
+                    targets)))
          (backend-column
           (gptel-model-updater--next-tab-stop
            (apply #'max (mapcar (lambda (row) (string-width (nth 0 row)))
@@ -634,14 +642,16 @@ Each entry in TARGETS is (LABEL BACKEND MODEL)."
   "Return a display string for all configured external targets."
   (gptel-model-updater--format-target-fields
    (mapcar #'gptel-model-updater--external-target-fields
-           gptel-model-updater-external-targets)))
+           gptel-model-updater-external-targets)
+   t))
 
 (defun gptel-model-updater--format-all-targets ()
   "Return a display string for all configured targets."
   (gptel-model-updater--format-target-fields
    (cons (gptel-model-updater--default-target-fields)
          (mapcar #'gptel-model-updater--external-target-fields
-                 gptel-model-updater-external-targets))))
+                 gptel-model-updater-external-targets))
+   t))
 
 (defun gptel-model-updater--read-target ()
   "Read one configured target interactively."

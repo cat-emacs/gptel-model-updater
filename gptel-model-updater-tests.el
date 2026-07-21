@@ -535,9 +535,10 @@
              gptel-model-updater--test-forge-model "GPTel-Forge-Prs"))))
     (should
      (equal (gptel-model-updater--format-all-targets)
-            (concat "GPTel:\t\t\tbackend=Gemini\t\tmodel=gemini-pro\n"
-                    "GPTel-Magit:\t\tbackend=OpenRouter\tmodel=openai/gpt\n"
-                    "GPTel-Forge-Prs:\tbackend=MLX\t\tmodel=mlx/model")))))
+            (concat "Target\t\tBackend\t\tModel\n"
+                    "GPTel\t\tGemini\t\tgemini-pro\n"
+                    "GPTel-Magit\tOpenRouter\topenai/gpt\n"
+                    "GPTel-Forge-Prs\tMLX\t\tmlx/model")))))
 
 (ert-deftest gptel-model-updater-transient-backend-row-description ()
   "Per-backend rows show effective include/exclude/max with global fallback."
