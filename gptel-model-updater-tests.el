@@ -511,10 +511,10 @@
          (target '(gptel-model-updater--test-tr-backend
                    gptel-model-updater--test-tr-model "Fast")))
     (should (equal (gptel-model-updater--transient-target-description target)
-                   "Fast:\tbackend=transient-desc-test\tmodel=gpt-4o"))))
+                   "Fast:  backend=transient-desc-test  model=gpt-4o"))))
 
-(ert-deftest gptel-model-updater-format-all-targets-aligns-with-tabs ()
-  "Target output aligns backend and model fields using tabs."
+(ert-deftest gptel-model-updater-format-all-targets-aligns-with-spaces ()
+  "Target output aligns backend and model fields using spaces."
   (defvar gptel-model-updater--test-magit-backend nil)
   (defvar gptel-model-updater--test-magit-model nil)
   (defvar gptel-model-updater--test-forge-backend nil)
@@ -533,12 +533,37 @@
              gptel-model-updater--test-magit-model "GPTel-Magit")
             (gptel-model-updater--test-forge-backend
              gptel-model-updater--test-forge-model "GPTel-Forge-Prs"))))
-    (should
-     (equal (gptel-model-updater--format-all-targets)
-            (concat "Target\t\tBackend\t\tModel\n"
-                    "GPTel\t\tGemini\t\tgemini-pro\n"
-                    "GPTel-Magit\tOpenRouter\topenai/gpt\n"
-                    "GPTel-Forge-Prs\tMLX\t\tmlx/model")))))
+    (let* ((output (gptel-model-updater--format-all-targets))
+           (lines (string-split output "\n")))
+      (should-not (string-match-p "\t" output))
+      (should (equal (cl-mapcar #'string-match
+                                '("Backend" "Gemini" "OpenRouter" "MLX")
+                                lines)
+                     '(17 17 17 17)))
+      (should (equal (cl-mapcar #'string-match
+                                '("Model" "gemini-pro"
+                                  "openai/gpt" "mlx/model")
+                                lines)
+                     '(29 29 29 29))))))
+
+(ert-deftest gptel-model-updater-format-target-table-aligns-raw-text ()
+  "Target table columns align without relying on tab rendering."
+  (let* ((output
+          (gptel-model-updater--format-target-fields
+           '(("GPTel" "IV" "gpt-5.4")
+             ("GPTel-Magit" "IV" "deepseek-v4-flash")
+             ("GPTel-Forge-Prs" "IV" "deepseek-v4-flash"))
+           t))
+         (lines (string-split output "\n")))
+    (should-not (string-match-p "\t" output))
+    (should (equal (cl-mapcar #'string-match
+                              '("Backend" "IV" "IV" "IV") lines)
+                   '(17 17 17 17)))
+    (should (equal (cl-mapcar #'string-match
+                              '("Model" "gpt-5.4"
+                                "deepseek-v4-flash" "deepseek-v4-flash")
+                              lines)
+                   '(26 26 26 26)))))
 
 (ert-deftest gptel-model-updater-transient-backend-row-description ()
   "Per-backend rows show effective include/exclude/max with global fallback."

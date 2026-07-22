@@ -5,7 +5,7 @@
 ;; Author: pfcdx <github@pfcdx>
 ;; Maintainer: Misaka <chuxubank@qq.com>
 ;; Assisted-by: opencode:deepseek-v4-flash-free
-;; Version: 0.3.1
+;; Version: 0.3.2
 ;; Package-Requires: ((emacs "29.1") (gptel "0.8"))
 ;; Keywords: comm, tools, processes
 ;; URL: https://github.com/chuxubank/gptel-model-updater
@@ -576,20 +576,12 @@ PROMPT-PREFIX is prepended to completion prompts."
           (and (boundp model-variable)
                (symbol-value model-variable)))))
 
-(defun gptel-model-updater--next-tab-stop (column)
-  "Return the tab stop following COLUMN."
-  (* (1+ (/ column 8)) 8))
-
-(defun gptel-model-updater--tabs-to-column (column target-column)
-  "Return tabs advancing from COLUMN to TARGET-COLUMN."
-  (let ((tabs ""))
-    (while (< column target-column)
-      (setq tabs (concat tabs "\t")
-            column (gptel-model-updater--next-tab-stop column)))
-    tabs))
+(defun gptel-model-updater--pad-target-field (field width)
+  "Pad FIELD with spaces to WIDTH plus a two-column gap."
+  (concat field (make-string (+ 2 (- width (string-width field))) ?\s)))
 
 (defun gptel-model-updater--format-target-fields (targets &optional table)
-  "Format TARGETS with tab-aligned backend and model columns.
+  "Format TARGETS with aligned backend and model columns.
 Each entry in TARGETS is (LABEL BACKEND MODEL).  When TABLE is non-nil,
 include a header row and omit punctuation and field prefixes."
   (let* ((rows
@@ -604,26 +596,19 @@ include a header row and omit punctuation and field prefixes."
                             (format "backend=%s" (nth 1 target))
                             (format "model=%s" (nth 2 target))))
                     targets)))
-         (backend-column
-          (gptel-model-updater--next-tab-stop
-           (apply #'max (mapcar (lambda (row) (string-width (nth 0 row)))
-                                rows))))
-         (model-column
-          (gptel-model-updater--next-tab-stop
-           (+ backend-column
-              (apply #'max (mapcar (lambda (row) (string-width (nth 1 row)))
-                                   rows))))))
+         (label-width
+          (apply #'max (mapcar (lambda (row) (string-width (nth 0 row)))
+                               rows)))
+         (backend-width
+          (apply #'max (mapcar (lambda (row) (string-width (nth 1 row)))
+                               rows))))
     (mapconcat
      (lambda (row)
        (let ((label (nth 0 row))
              (backend (nth 1 row))
              (model (nth 2 row)))
-         (concat label
-                 (gptel-model-updater--tabs-to-column
-                  (string-width label) backend-column)
-                 backend
-                 (gptel-model-updater--tabs-to-column
-                  (+ backend-column (string-width backend)) model-column)
+         (concat (gptel-model-updater--pad-target-field label label-width)
+                 (gptel-model-updater--pad-target-field backend backend-width)
                  model)))
      rows
      "\n")))
