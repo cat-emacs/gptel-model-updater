@@ -5,7 +5,7 @@
 ;; Author: pfcdx <github@pfcdx>
 ;; Maintainer: Misaka <chuxubank@qq.com>
 ;; Assisted-by: opencode:deepseek-v4-flash-free
-;; Version: 0.3.2
+;; Version: 0.3.3
 ;; Package-Requires: ((emacs "29.1") (gptel "0.8"))
 ;; Keywords: comm, tools, processes
 ;; URL: https://github.com/chuxubank/gptel-model-updater
@@ -580,22 +580,23 @@ PROMPT-PREFIX is prepended to completion prompts."
   "Pad FIELD with spaces to WIDTH plus a two-column gap."
   (concat field (make-string (+ 2 (- width (string-width field))) ?\s)))
 
-(defun gptel-model-updater--format-target-fields (targets &optional table)
+(defun gptel-model-updater--format-target-fields (targets &optional style)
   "Format TARGETS with aligned backend and model columns.
-Each entry in TARGETS is (LABEL BACKEND MODEL).  When TABLE is non-nil,
-include a header row and omit punctuation and field prefixes."
-  (let* ((rows
-          (if table
-              (cons '("Target" "Backend" "Model")
-                    (mapcar (lambda (target)
-                              (mapcar (lambda (field) (format "%s" field))
-                                      target))
-                            targets))
-            (mapcar (lambda (target)
-                      (list (format "%s:" (nth 0 target))
-                            (format "backend=%s" (nth 1 target))
-                            (format "model=%s" (nth 2 target))))
-                    targets)))
+Each entry in TARGETS is (LABEL BACKEND MODEL).  STYLE `plain' omits
+punctuation and field prefixes.  Any other non-nil STYLE also adds a header."
+  (let* ((fields (mapcar (lambda (target)
+                           (mapcar (lambda (field) (format "%s" field))
+                                   target))
+                         targets))
+         (rows
+          (cond
+           ((eq style 'plain) fields)
+           (style (cons '("Target" "Backend" "Model") fields))
+           (t (mapcar (lambda (target)
+                        (list (format "%s:" (nth 0 target))
+                              (format "backend=%s" (nth 1 target))
+                              (format "model=%s" (nth 2 target))))
+                      targets))))
          (label-width
           (apply #'max (mapcar (lambda (row) (string-width (nth 0 row)))
                                rows)))

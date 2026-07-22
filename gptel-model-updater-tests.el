@@ -502,16 +502,48 @@
       (should (equal (car (nth 2 rows)) "2")))))
 
 (ert-deftest gptel-model-updater-transient-target-description-reflects-state ()
-  "Target descriptions reflect the current variable values."
+  "Target descriptions reflect state without field prefixes."
   (defvar gptel-model-updater--test-tr-backend nil)
   (defvar gptel-model-updater--test-tr-model nil)
-  (let* ((backend (gptel-make-openai "transient-desc-test" :models '(gpt-4o)))
+  (let* ((gptel-backend (gptel-make-openai "IV" :models '(gpt-5.4)))
+         (gptel-model 'gpt-5.4)
+         (backend (gptel-make-openai "transient-desc-test" :models '(gpt-4o)))
          (gptel-model-updater--test-tr-backend backend)
          (gptel-model-updater--test-tr-model 'gpt-4o)
          (target '(gptel-model-updater--test-tr-backend
-                   gptel-model-updater--test-tr-model "Fast")))
+                   gptel-model-updater--test-tr-model "Fast"))
+         (gptel-model-updater-external-targets (list target)))
     (should (equal (gptel-model-updater--transient-target-description target)
-                   "Fast:  backend=transient-desc-test  model=gpt-4o"))))
+                   "Fast   transient-desc-test  gpt-4o"))))
+
+(ert-deftest gptel-model-updater-transient-target-descriptions-align-columns ()
+  "All transient target descriptions share backend and model columns."
+  (defvar gptel-model-updater--test-tr-magit-backend nil)
+  (defvar gptel-model-updater--test-tr-magit-model nil)
+  (defvar gptel-model-updater--test-tr-forge-backend nil)
+  (defvar gptel-model-updater--test-tr-forge-model nil)
+  (let* ((gptel-backend (gptel-make-openai "IV" :models '(gpt-5.4)))
+         (gptel-model 'gpt-5.4)
+         (gptel-model-updater--test-tr-magit-backend gptel-backend)
+         (gptel-model-updater--test-tr-magit-model 'deepseek-v4-flash)
+         (gptel-model-updater--test-tr-forge-backend gptel-backend)
+         (gptel-model-updater--test-tr-forge-model 'deepseek-v4-flash)
+         (gptel-model-updater-external-targets
+          '((gptel-model-updater--test-tr-magit-backend
+             gptel-model-updater--test-tr-magit-model "GPTel-Magit")
+            (gptel-model-updater--test-tr-forge-backend
+             gptel-model-updater--test-tr-forge-model "GPTel-Forge-Prs")))
+         (descriptions
+          (mapcar #'cdr (gptel-model-updater--transient-target-descriptions))))
+    (should-not (string-match-p "backend=\|model=\|\t"
+                                (string-join descriptions "\n")))
+    (should (equal (cl-mapcar #'string-match '("IV" "IV" "IV") descriptions)
+                   '(17 17 17)))
+    (should (equal (cl-mapcar #'string-match
+                              '("gpt-5.4" "deepseek-v4-flash"
+                                "deepseek-v4-flash")
+                              descriptions)
+                   '(21 21 21)))))
 
 (ert-deftest gptel-model-updater-format-all-targets-aligns-with-spaces ()
   "Target output aligns backend and model fields using spaces."

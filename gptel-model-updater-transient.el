@@ -91,9 +91,24 @@ spec from `gptel-model-updater-external-targets'."
 
 (defun gptel-model-updater--transient-target-description (target)
   "Return a display string for TARGET row."
+  (cdr (assoc target (gptel-model-updater--transient-target-descriptions))))
+
+(defun gptel-model-updater--transient-target-fields (target)
+  "Return display fields for transient TARGET."
   (if (eq target 'gptel)
-      (gptel-model-updater--format-default-target)
-    (gptel-model-updater--format-external-target target)))
+      (gptel-model-updater--default-target-fields)
+    (gptel-model-updater--external-target-fields target)))
+
+(defun gptel-model-updater--transient-target-descriptions ()
+  "Return aligned (TARGET . DESCRIPTION) entries for the transient."
+  (let* ((targets (mapcar #'cdr (gptel-model-updater--transient-targets)))
+         (descriptions
+          (string-split
+           (gptel-model-updater--format-target-fields
+            (mapcar #'gptel-model-updater--transient-target-fields targets)
+            'plain)
+           "\n")))
+    (cl-mapcar #'cons targets descriptions)))
 
 (defun gptel-model-updater--transient-select-target (target)
   "Interactively select the backend and model for TARGET."
