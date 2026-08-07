@@ -8,7 +8,7 @@
 ;; Version: 0.3.3
 ;; Package-Requires: ((emacs "29.1") (gptel "0.8"))
 ;; Keywords: comm, tools, processes
-;; URL: https://github.com/chuxubank/gptel-model-updater
+;; URL: https://github.com/cat-emacs/gptel-model-updater
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by

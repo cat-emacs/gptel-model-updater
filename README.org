@@ -3,7 +3,7 @@
 # [[https://melpa.org/#/gptel-model-updater][https://melpa.org/packages/gptel-model-updater-badge.svg]]
 
 #+ATTR_HTML: :title CI
-[[https://github.com/chuxubank/cat-emacs/actions/workflows/ci.yml][https://github.com/chuxubank/cat-emacs/actions/workflows/ci.yml/badge.svg]]
+[[https://github.com/cat-emacs/cat-emacs/actions/workflows/ci.yml][https://github.com/cat-emacs/cat-emacs/actions/workflows/ci.yml/badge.svg]]
 
 Fetch model IDs for [[https://github.com/karthink/gptel][gptel]]
 backends and write them to =gptel-backend-models=. When available, model
@@ -23,7 +23,7 @@ model.
 ** Install
 #+begin_src elisp
 (use-package gptel-model-updater
-  :vc (:url "https://github.com/chuxubank/gptel-model-updater")
+  :vc (:url "https://github.com/cat-emacs/gptel-model-updater")
   :after gptel
   :custom
   (gptel-model-updater-backends
@@ -36,7 +36,7 @@ Or with =straight.el=:
 
 #+begin_src elisp
 (straight-use-package
-  '(gptel-model-updater :host github :repo "chuxubank/gptel-model-updater"))
+  '(gptel-model-updater :host github :repo "cat-emacs/gptel-model-updater"))
 #+end_src
 
 ** Setup
