@@ -12,6 +12,7 @@
 
 (require 'ert)
 (require 'gptel-model-updater)
+(require 'gptel-openai)
 (require 'gptel-model-updater-transient)
 
 (ert-deftest gptel-model-updater-parse-models-keeps-provider-order ()
@@ -267,6 +268,7 @@
     (unwind-protect
         (progn
           (set 'gptel-model-updater--all-provider-test-backend backend)
+          (setf (symbol-plist 'gpt-4o) nil)
           (gptel-model-updater-metadata-apply '(gpt-4o) backend 'openai)
           (should (equal (get 'gpt-4o :description) "First GPT-4o")))
       (makunbound 'gptel-model-updater--all-provider-test-backend)
