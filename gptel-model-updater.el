@@ -5,7 +5,7 @@
 ;; Author: pfcdx <github@pfcdx>
 ;; Maintainer: Misaka <chuxubank@qq.com>
 ;; Assisted-by: opencode:deepseek-v4-flash-free
-;; Version: 0.3.3
+;; Version: 0.4.0
 ;; Package-Requires: ((emacs "29.1") (gptel "0.8"))
 ;; Keywords: comm, tools, processes
 ;; URL: https://github.com/cat-emacs/gptel-model-updater
@@ -26,7 +26,9 @@
 ;;; Commentary:
 
 ;; A package to fetch and update models for GPTel backends from various providers.
-;; Supports OpenAI-compatible APIs, Ollama, and Gemini.
+;; Supports OpenAI-compatible APIs, Anthropic, Ollama, and Gemini.
+;; A readable backend :cache file supplies the raw model list; otherwise the
+;; provider is fetched.  Fields carried by that list override models.dev.
 
 ;;; Code:
 
@@ -105,10 +107,12 @@ Each function is called with BACKEND-NAME, BACKEND, and MODELS."
 
 (defcustom gptel-model-updater-backends nil
   "GPTel backends managed by `gptel-model-updater'.
-Each entry may be a backend variable symbol, or (BACKEND :providers PROVIDERS).
+Each entry may be a backend variable symbol, or (BACKEND :providers PROVIDERS :cache FILE).
 BACKEND is a backend variable symbol.  PROVIDERS is a models.dev provider key
 symbol or a list of provider key symbols tried in order for metadata.  The
-special provider key `all' searches all models.dev providers."
+special provider key `all' searches all models.dev providers.  FILE is a raw
+model-list JSON file.  When FILE is readable it is used instead of a live
+request; a missing or unreadable FILE falls back to the provider."
   :type '(repeat (choice symbol sexp))
   :group 'gptel-model-updater)
 
@@ -162,6 +166,20 @@ target.  These targets are selected and set when
         (throw 'providers
                (gptel-model-updater--backend-spec-providers spec))))))
 
+(defun gptel-model-updater--backend-cache (backend)
+  "Return the raw model-list cache file configured for BACKEND, or nil."
+  (catch 'cache
+    (dolist (spec gptel-model-updater-backends)
+      (when-let* ((symbol (gptel-model-updater--backend-spec-symbol spec))
+                  ((boundp symbol))
+                  ((eq (symbol-value symbol) backend)))
+        (throw 'cache
+               (and (consp spec)
+                    (let ((file (plist-get (cdr spec) :cache)))
+                      (and (stringp file)
+                           (not (string-empty-p file))
+                           file))))))))
+
 (defun gptel-model-updater--backend-p (backend predicate)
   "Return non-nil when BACKEND satisfies PREDICATE.
 PREDICATE may be undefined if the corresponding gptel provider file has not
@@ -171,10 +189,11 @@ been loaded yet."
 
 (defun gptel-model-updater--detect-provider (backend)
   "Detect provider type for BACKEND struct.
-Returns one of `openai', `gemini', or `ollama'."
+Returns one of `openai', `anthropic', `gemini', or `ollama'."
   (cond
    ((gptel-model-updater--backend-p backend 'gptel-gemini-p) 'gemini)
    ((gptel-model-updater--backend-p backend 'gptel-ollama-p) 'ollama)
+   ((gptel-model-updater--backend-p backend 'gptel-anthropic-p) 'anthropic)
    ((gptel-model-updater--backend-p backend 'gptel-openai-p) 'openai)
    (t 'openai)))
 
@@ -189,6 +208,10 @@ API-KEY is used for providers that require it in the query string."
        (format "%s://%s/v1beta/models?key=%s&pageSize=1000" protocol host (or api-key "")))
       ('ollama
        (format "%s://%s/api/tags" protocol host))
+      ;; Chat uses /v1/messages.  The model list is /v1/models; appending
+      ;; "models" to the chat endpoint produces /v1/messagesmodels.
+      ('anthropic
+       (format "%s://%s/v1/models" protocol host))
       (_
        (let* ((base-path (replace-regexp-in-string "chat/completions.*" "" (or endpoint "")))
               (models-url (concat base-path "models")))
@@ -198,10 +221,11 @@ API-KEY is used for providers that require it in the query string."
   "Build request headers for PROVIDER-TYPE with API-KEY."
   (append '(("Content-Type" . "application/json"))
           (pcase provider-type
-            ('openai
+            ((or 'openai 'anthropic)
              (when api-key
                `(("Authorization" . ,(concat "Bearer " api-key)))))
-            ;; Gemini uses query param for key, no auth header needed
+            ;; Gemini uses query param for key, no auth header needed.
+            ;; Ollama has no auth header.
             (_ nil))))
 
 (defun gptel-model-updater--curl-program ()
@@ -336,20 +360,36 @@ CALLBACK is called with (success raw-data error-message)."
     (gptel-model-updater--fetch-models-with-url
      backend-name provider-type url headers callback)))
 
+(defun gptel-model-updater--raw-model-id (entry provider-type)
+  "Return the model id string for ENTRY of PROVIDER-TYPE, or nil.
+Gemini resource names drop a leading \"models/\"."
+  (pcase provider-type
+    ('gemini
+     (let ((name (or (alist-get 'name entry) "")))
+       (if (string-prefix-p "models/" name)
+           (substring name 7)
+         name)))
+    (_
+     (or (alist-get 'id entry)
+         (alist-get 'name entry)))))
+
+(defun gptel-model-updater--index-raw-models (raw-data provider-type)
+  "Return an alist of (MODEL . ENTRY) for RAW-DATA of PROVIDER-TYPE.
+The first entry for an id wins, matching `gptel-model-updater--parse-models'."
+  (let (index)
+    (dolist (entry raw-data)
+      (let ((id (gptel-model-updater--raw-model-id entry provider-type)))
+        (when (and (stringp id)
+                   (not (string-empty-p id))
+                   (not (assq (intern id) index)))
+          (push (cons (intern id) entry) index))))
+    (nreverse index)))
+
 (defun gptel-model-updater--parse-models (raw-data provider-type)
   "Parse RAW-DATA from PROVIDER-TYPE into a list of model symbols."
   (let ((models nil))
-    (dolist (m raw-data)
-      (let ((id (pcase provider-type
-                  ('gemini
-                   ;; Gemini returns "models/gemini-2.5-pro", strip prefix
-                   (let ((name (or (alist-get 'name m) "")))
-                     (if (string-prefix-p "models/" name)
-                         (substring name 7)
-                       name)))
-                  (_
-                   (or (alist-get 'id m)
-                       (alist-get 'name m))))))
+    (dolist (entry raw-data)
+      (let ((id (gptel-model-updater--raw-model-id entry provider-type)))
         (when (and id (not (string-empty-p id)))
           (push (intern id) models))))
     (setq models (delete-dups (nreverse models)))
@@ -740,57 +780,118 @@ With \\[universal-argument], interactively select which target to update."
       (message "GPTel targets set\n%s"
                (gptel-model-updater--format-all-targets)))))
 
+(defun gptel-model-updater--read-cache (file provider-type)
+  "Return (t . RAW-DATA) from FILE for PROVIDER-TYPE, or nil.
+Return nil when FILE is missing or its body is not valid JSON."
+  (when (and (stringp file) (file-readable-p file))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (gptel-model-updater--parse-response provider-type (buffer-string)))))
+
+(defun gptel-model-updater--install-models
+    (backend-name backend provider raw-data model-list)
+  "Install RAW-DATA onto BACKEND for BACKEND-NAME.
+PROVIDER is the provider type and MODEL-LIST orders available models.
+Return non-nil when at least one new model was installed."
+  (let* ((parsed-models (gptel-model-updater--parse-models raw-data provider))
+         (new-models (gptel-model-updater--prepare-models
+                      parsed-models
+                      (gptel-model-updater--effective-model-list model-list)
+                      backend-name))
+         (merged-models
+          (gptel-model-updater--merge-models-preserving-existing
+           (gptel-backend-models backend)
+           new-models)))
+    (if (not new-models)
+        (progn
+          (message "GPTel-Model-Updater: No models found for %s" backend-name)
+          nil)
+      ;; Snapshot first so a nil overwrite setting still keeps properties
+      ;; that were already configured.  The list is applied after models.dev
+      ;; because endpoint fields win over the vendor catalog.
+      (let ((originals (mapcar (lambda (model)
+                                 (cons model (copy-sequence (symbol-plist model))))
+                               merged-models)))
+        (gptel-model-updater-metadata-apply merged-models backend provider)
+        (gptel-model-updater-metadata-apply-list
+         merged-models
+         (gptel-model-updater--index-raw-models raw-data provider)
+         provider
+         originals))
+      (setf (gptel-backend-models backend) merged-models)
+      (message "GPTel-Model-Updater: Updated %s with %d models%s"
+               backend-name
+               (length merged-models)
+               (if (= (length new-models) (length parsed-models))
+                   ""
+                 (format " from %d fetched models" (length parsed-models))))
+      (run-hook-with-args 'gptel-model-updater-after-update-hook
+                          backend-name backend merged-models)
+      t)))
+
+(defun gptel-model-updater--fetch-and-install
+    (backend-name backend provider key-source api-key url model-list done-callback)
+  "Fetch and install models for BACKEND-NAME.
+BACKEND is the gptel backend and PROVIDER is its provider type.
+KEY-SOURCE and API-KEY come from BACKEND.  URL overrides the models
+endpoint.  MODEL-LIST orders available models.  DONE-CALLBACK runs when
+the update finishes."
+  (if (and (memq provider '(openai gemini anthropic)) key-source (not api-key))
+      (progn
+        (message "GPTel-Model-Updater: Skipping %s, no API key found" backend-name)
+        (when done-callback
+          (funcall done-callback)))
+    (let ((fetch-url (or url (gptel-model-updater--build-url backend provider api-key)))
+          (headers (gptel-model-updater--build-headers provider api-key)))
+      (gptel-model-updater--fetch-models
+       backend-name provider fetch-url headers
+       (lambda (success raw-data error-msg)
+         (unwind-protect
+             (if (not success)
+                 (message "GPTel-Model-Updater Error: %s (%s)" backend-name error-msg)
+               (gptel-model-updater--install-models
+                backend-name backend provider raw-data model-list))
+           (when done-callback
+             (funcall done-callback))))))))
+
 ;;;###autoload
 (defun gptel-model-updater-update-backend
     (backend-name &optional provider-type url model-list done-callback)
   "Update models for BACKEND-NAME.
-PROVIDER-TYPE can be `openai', `ollama', or `gemini'.
+PROVIDER-TYPE can be `openai', `anthropic', `ollama', or `gemini'.
 If nil, it is auto-detected from the backend struct type.
 URL overrides the default endpoint.  MODEL-LIST orders available models.
-DONE-CALLBACK is called after this backend update finishes."
+DONE-CALLBACK is called after this backend update finishes.
+A readable :cache file on the backend spec is used instead of a request."
   (interactive
    (let ((backends (gptel-model-updater--get-backends)))
      (list (completing-read "Backend: " backends nil t))))
   (let* ((backend (gptel-get-backend backend-name))
          (provider (or provider-type (gptel-model-updater--detect-provider backend)))
          (key-source (gptel-backend-key backend))
-         (api-key (gptel-model-updater--get-api-key backend key-source)))
-    (if (and (memq provider '(openai gemini)) key-source (not api-key))
-        (progn
-          (message "GPTel-Model-Updater: Skipping %s, no API key found" backend-name)
-          (when done-callback
-            (funcall done-callback)))
-      (let ((fetch-url (or url (gptel-model-updater--build-url backend provider api-key)))
-            (headers (gptel-model-updater--build-headers provider api-key)))
-        (gptel-model-updater--fetch-models
-         backend-name provider fetch-url headers
-         (lambda (success raw-data error-msg)
-           (unwind-protect
-               (if (not success)
-                   (message "GPTel-Model-Updater Error: %s (%s)" backend-name error-msg)
-                (let* ((parsed-models (gptel-model-updater--parse-models raw-data provider))
-                       (new-models (gptel-model-updater--prepare-models
-                                    parsed-models
-                                    (gptel-model-updater--effective-model-list model-list)
-                                    backend-name))
-                       (merged-models
-                        (gptel-model-updater--merge-models-preserving-existing
-                         (gptel-backend-models backend)
-                         new-models)))
-                  (if (not new-models)
-                      (message "GPTel-Model-Updater: No models found for %s" backend-name)
-                    (gptel-model-updater-metadata-apply merged-models backend provider)
-                    (setf (gptel-backend-models backend) merged-models)
-                    (message "GPTel-Model-Updater: Updated %s with %d models%s"
-                             backend-name
-                             (length merged-models)
-                             (if (= (length new-models) (length parsed-models))
-                                 ""
-                               (format " from %d fetched models" (length parsed-models))))
-                    (run-hook-with-args 'gptel-model-updater-after-update-hook
-                                        backend-name backend merged-models))))
-             (when done-callback
-               (funcall done-callback)))))))))
+         (api-key (gptel-model-updater--get-api-key backend key-source))
+         (cache (gptel-model-updater--backend-cache backend)))
+    (cond
+     ((and cache (file-readable-p cache))
+      (let ((parsed (gptel-model-updater--read-cache cache provider)))
+        (if parsed
+            (unwind-protect
+                (gptel-model-updater--install-models
+                 backend-name backend provider (cdr parsed) model-list)
+              (when done-callback
+                (funcall done-callback)))
+          (message "GPTel-Model-Updater: Could not parse model cache for %s, fetching"
+                   backend-name)
+          (gptel-model-updater--fetch-and-install
+           backend-name backend provider key-source api-key url model-list
+           done-callback))))
+     (t
+      (when cache
+        (message "GPTel-Model-Updater: Model cache for %s is not readable, fetching"
+                 backend-name))
+      (gptel-model-updater--fetch-and-install
+       backend-name backend provider key-source api-key url model-list
+       done-callback)))))
 
 ;;;###autoload
 (defun gptel-model-updater-update-all (&optional model-list)

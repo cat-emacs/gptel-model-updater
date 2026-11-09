@@ -274,6 +274,158 @@
       (makunbound 'gptel-model-updater--all-provider-test-backend)
       (setf (symbol-plist 'gpt-4o) nil))))
 
+(ert-deftest gptel-model-updater-anthropic-models-url ()
+  "Anthropic model lists use /v1/models and Bearer auth."
+  (let ((backend (gptel-make-openai "anthropic-url-test"
+                   :host "llm.example"
+                   :protocol "http"
+                   :endpoint "/v1/messages"
+                   :models '())))
+    (should (equal (gptel-model-updater--build-url backend 'anthropic "secret")
+                   "http://llm.example/v1/models"))
+    (should (equal (gptel-model-updater--build-headers 'anthropic "secret")
+                   '(("Content-Type" . "application/json")
+                     ("Authorization" . "Bearer secret"))))))
+
+(ert-deftest gptel-model-updater-backend-cache-reads-spec ()
+  "Backend specs expose their raw model-list cache file."
+  (let* ((backend (gptel-make-openai "cache-spec-test" :models '()))
+         (gptel-model-updater-backends
+          '((gptel-model-updater--cache-spec-backend
+             :providers (all)
+             :cache "/tmp/models.json"))))
+    (unwind-protect
+        (progn
+          (set 'gptel-model-updater--cache-spec-backend backend)
+          (should (equal (gptel-model-updater--backend-cache backend)
+                         "/tmp/models.json")))
+      (makunbound 'gptel-model-updater--cache-spec-backend))))
+
+(ert-deftest gptel-model-updater-update-backend-reads-cache ()
+  "A readable cache file is installed without a live request."
+  (let* ((backend (gptel-make-openai "cache-read-test"
+                    :models '() :host "example.invalid" :key nil))
+         (file (make-temp-file "gptel-model-updater-cache" nil ".json"
+                               "{\"data\":[{\"id\":\"cache-model\",\"display_name\":\"Cache Model\"}]}"))
+         (fetched nil)
+         (gptel-model-updater-backends
+          `((gptel-model-updater--cache-read-backend :cache ,file)))
+         (gptel-model-updater-model-metadata-url nil)
+         (gptel-model-updater-model-metadata-file nil))
+    (unwind-protect
+        (progn
+          (set 'gptel-model-updater--cache-read-backend backend)
+          (cl-letf (((symbol-function 'gptel-model-updater--fetch-models)
+                     (lambda (&rest _args) (setq fetched t))))
+            (gptel-model-updater-update-backend "cache-read-test"))
+          (should-not fetched)
+          (should (equal (gptel-backend-models backend) '(cache-model)))
+          (should (equal (get 'cache-model :description) "Cache Model")))
+      (makunbound 'gptel-model-updater--cache-read-backend)
+      (setf (symbol-plist 'cache-model) nil)
+      (delete-file file))))
+
+(ert-deftest gptel-model-updater-metadata-get-prefers-file ()
+  "A readable models.dev file is used instead of the metadata URL."
+  (let* ((file (make-temp-file "gptel-model-updater-metadata" nil ".json"
+                               "{\"openai\":{\"models\":{}}}"))
+         (gptel-model-updater-model-metadata-file file)
+         (gptel-model-updater-model-metadata-url "https://example.invalid/api.json")
+         (gptel-model-updater-metadata--cache nil)
+         (gptel-model-updater-metadata--cache-url nil)
+         (fetched nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'gptel-model-updater-metadata--fetch)
+                   (lambda (&rest _args) (setq fetched t) nil)))
+          (should (equal (gptel-model-updater-metadata-get)
+                         '((openai (models)))))
+          (should-not fetched)
+          (should (equal (gptel-model-updater-metadata-get)
+                         '((openai (models)))))
+          (should-not fetched))
+      (setq gptel-model-updater-metadata--cache nil
+            gptel-model-updater-metadata--cache-url nil)
+      (delete-file file))))
+
+(ert-deftest gptel-model-updater-list-metadata-overrides-models-dev ()
+  "List fields override models.dev without dropping unrelated capabilities."
+  (let* ((model 'gptel-model-updater-list-override)
+         (backend (gptel-make-openai "list-override-test"
+                    :host "example.invalid"
+                    :models '()))
+         (metadata
+          `((openai
+             (models
+              (,model
+               (name . "From models.dev")
+               (reasoning . :json-false)
+               (tool_call . t)
+               (structured_output . t)
+               (knowledge . "2023-10")
+               (modalities . ((input . ["text" "image"])
+                              (output . ["text"])))
+               (limit . ((context . 128000)))
+               (cost . ((input . 2.5)
+                        (output . 10))))))))
+         (raw `(((id . "gptel-model-updater-list-override")
+                 (display_name . "From list")
+                 (context_length . 256000)
+                 (reasoning . t)
+                 (tool_call . :json-false)
+                 (modalities . ((input . ["text"])))
+                 (pricing . ((prompt . "0.000002")
+                             (completion . "0.000003"))))))
+         (gptel-model-updater-backends
+          '((gptel-model-updater--list-override-backend :providers (openai))))
+         (gptel-model-updater-metadata--cache metadata)
+         (gptel-model-updater-metadata--cache-url
+          gptel-model-updater-model-metadata-url)
+         (gptel-model-updater-metadata-overwrite-existing t))
+    (unwind-protect
+        (progn
+          (set 'gptel-model-updater--list-override-backend backend)
+          (setf (symbol-plist model) '(:context-window 32))
+          (gptel-model-updater--install-models
+           "list-override-test" backend 'openai raw nil)
+          (should (equal (get model :description) "From list"))
+          (should (equal (get model :context-window) 256))
+          (should (= (get model :input-cost) 2.0))
+          (should (= (get model :output-cost) 3.0))
+          (should (equal (get model :cutoff-date) "2023-10"))
+          (should (equal (get model :capabilities) '(json reasoning)))
+          (should-not (plist-member (symbol-plist model) :mime-types)))
+      (makunbound 'gptel-model-updater--list-override-backend)
+      (setf (symbol-plist model) nil))))
+
+(ert-deftest gptel-model-updater-list-metadata-keeps-original-properties ()
+  "List metadata does not replace properties that were already set."
+  (let* ((model 'gptel-model-updater-list-keep)
+         (backend (gptel-make-openai "list-keep-test"
+                    :host "example.invalid"
+                    :models '()))
+         (raw `(((id . "gptel-model-updater-list-keep")
+                 (display_name . "From list")
+                 (max_input_tokens . 64000)
+                 (pricing . ((prompt . "0.000002")
+                             (completion . "0.000003"))))))
+         (gptel-model-updater-model-metadata-url nil)
+         (gptel-model-updater-model-metadata-file nil)
+         (gptel-model-updater-metadata-overwrite-existing nil))
+    (unwind-protect
+        (progn
+          (setf (symbol-plist model)
+                '(:description "Already set"
+                  :context-window 32
+                  :capabilities (tool-use)))
+          (gptel-model-updater--install-models
+           "list-keep-test" backend 'openai raw nil)
+          (should (equal (get model :description) "Already set"))
+          (should (equal (get model :context-window) 32))
+          (should (equal (get model :capabilities) '(tool-use)))
+          (should (= (get model :input-cost) 2.0))
+          (should (= (get model :output-cost) 3.0)))
+      (setf (symbol-plist model) nil))))
+
 (ert-deftest gptel-model-updater-format-model-annotation-uses-plist ()
   "Interactive model annotations display gptel model properties."
   (let ((model 'gptel-model-updater-test-model))

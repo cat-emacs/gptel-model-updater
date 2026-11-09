@@ -20,9 +20,20 @@
 
 (defcustom gptel-model-updater-model-metadata-url "https://models.dev/api.json"
   "URL for models.dev model metadata.
-When nil, refreshed models are written without additional model properties."
+When nil, refreshed models are written without additional model properties.
+A readable `gptel-model-updater-model-metadata-file' is preferred over this
+URL."
   :type '(choice (const :tag "Disable metadata" nil)
                  string)
+  :group 'gptel-model-updater)
+
+(defcustom gptel-model-updater-model-metadata-file nil
+  "File of models.dev JSON used before `gptel-model-updater-model-metadata-url'.
+When the file is readable, model properties are loaded from it and the URL
+is not fetched.  A missing file falls back to the URL.  When nil, only the
+URL is used."
+  :type '(choice (const :tag "Fetch the metadata URL" nil)
+                 file)
   :group 'gptel-model-updater)
 
 (defcustom gptel-model-updater-metadata-overwrite-existing nil
@@ -121,18 +132,43 @@ existing keys are preserved."
         (gptel-model-updater-metadata--fetch-with-curl url)
       (gptel-model-updater-metadata--fetch-with-url url))))
 
+(defun gptel-model-updater-metadata--read-file (file)
+  "Return parsed JSON from FILE, or nil when it cannot be read."
+  (when (and (stringp file) (file-readable-p file))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (gptel-model-updater-metadata--parse-json (buffer-string)))))
+
 (defun gptel-model-updater-metadata-get ()
-  "Return cached models.dev metadata, fetching it when needed."
-  (when gptel-model-updater-model-metadata-url
-    (unless (and gptel-model-updater-metadata--cache
-                 (equal gptel-model-updater-metadata--cache-url
-                        gptel-model-updater-model-metadata-url))
-      (setq gptel-model-updater-metadata--cache
-            (gptel-model-updater-metadata--fetch
-             gptel-model-updater-model-metadata-url)
-            gptel-model-updater-metadata--cache-url
-            gptel-model-updater-model-metadata-url))
-    gptel-model-updater-metadata--cache))
+  "Return cached models.dev metadata, reading a file or fetching the URL.
+A readable `gptel-model-updater-model-metadata-file' wins over
+`gptel-model-updater-model-metadata-url'."
+  (let* ((file gptel-model-updater-model-metadata-file)
+         (stamp (and (stringp file)
+                     (file-readable-p file)
+                     (list 'file file
+                           (file-attribute-modification-time
+                            (file-attributes file))))))
+    (if (and stamp
+             (equal gptel-model-updater-metadata--cache-url stamp))
+        gptel-model-updater-metadata--cache
+      (let ((parsed (and stamp
+                         (gptel-model-updater-metadata--read-file file))))
+        (if parsed
+            (progn
+              (setq gptel-model-updater-metadata--cache parsed
+                    gptel-model-updater-metadata--cache-url stamp)
+              gptel-model-updater-metadata--cache)
+          (when gptel-model-updater-model-metadata-url
+            (unless (and gptel-model-updater-metadata--cache
+                         (equal gptel-model-updater-metadata--cache-url
+                                gptel-model-updater-model-metadata-url))
+              (setq gptel-model-updater-metadata--cache
+                    (gptel-model-updater-metadata--fetch
+                     gptel-model-updater-model-metadata-url)
+                    gptel-model-updater-metadata--cache-url
+                    gptel-model-updater-model-metadata-url))
+            gptel-model-updater-metadata--cache))))))
 
 (defun gptel-model-updater-clear-model-metadata-cache ()
   "Clear cached models.dev metadata used for model properties."
@@ -233,12 +269,36 @@ When PROVIDER-KEY is `all', search all providers in metadata order."
           (or (alist-get direction (alist-get 'modalities model-entry))
               nil)))
 
+(defun gptel-model-updater-metadata--context-tokens (tokens)
+  "Return gptel's thousand-token context window for TOKENS, or nil."
+  (when (and (numberp tokens) (> tokens 0))
+    (if (and (integerp tokens) (zerop (mod tokens 1000)))
+        (/ tokens 1000)
+      (/ tokens 1000.0))))
+
 (defun gptel-model-updater-metadata--context-window (model-entry)
   "Return gptel context window value for MODEL-ENTRY."
-  (when-let* ((context (alist-get 'context (alist-get 'limit model-entry))))
-    (if (zerop (% context 1000))
-        (/ context 1000)
-      (/ context 1000.0))))
+  (gptel-model-updater-metadata--context-tokens
+   (alist-get 'context (alist-get 'limit model-entry))))
+
+(defun gptel-model-updater-metadata--per-token-cost (value)
+  "Return USD per million tokens for per-token VALUE, or nil.
+VALUE may be a number or a numeric string.  List prices are USD per token;
+gptel costs are USD per million tokens."
+  (let ((number (cond
+                 ((numberp value) value)
+                 ((and (stringp value)
+                       (string-match-p "\\`[+-]?[0-9]" value))
+                  (string-to-number value)))))
+    (when number
+      (* 1000000.0 number))))
+
+(defun gptel-model-updater-metadata--sequence (value)
+  "Return VALUE as a list."
+  (cond
+   ((null value) nil)
+   ((listp value) value)
+   (t (append value nil))))
 
 (defun gptel-model-updater-metadata--capabilities
     (model-entry provider-key provider-type backend)
@@ -317,6 +377,130 @@ When PROVIDER-KEY is `all', search all providers in metadata order."
           (setq plist (append plist (list (car new-plist) (cadr new-plist))))))
       (setq new-plist (cddr new-plist)))
     plist))
+
+(defun gptel-model-updater-metadata--plist-set (plist key value)
+  "Return PLIST with KEY set to VALUE.
+Remove KEY when VALUE is nil."
+  (let ((plist (copy-sequence plist)))
+    (if value
+        (plist-put plist key value)
+      (cl-loop for (k v) on plist by #'cddr
+               unless (eq k key)
+               append (list k v)))))
+
+(defun gptel-model-updater-metadata--adjust-capabilities (capabilities changes)
+  "Return CAPABILITIES adjusted by CHANGES.
+CHANGES is a list of (CAPABILITY . PRESENT).  Unmentioned capabilities are
+kept."
+  (let ((capabilities (copy-sequence capabilities)))
+    (pcase-dolist (`(,capability . ,present) changes)
+      (setq capabilities
+            (if present
+                (if (memq capability capabilities)
+                    capabilities
+                  (append capabilities (list capability)))
+              (delq capability capabilities))))
+    capabilities))
+
+(defun gptel-model-updater-metadata--list-spec (entry model provider-type)
+  "Return list-metadata overrides for MODEL from ENTRY.
+PROVIDER-TYPE selects which name field is the description.  The plist may
+contain :description, :context-window, :input-cost, :output-cost,
+:mime-types, :set-mime-types, and :capability-changes."
+  (let ((spec nil)
+        (changes nil)
+        (reasoning (or (assq 'reasoning entry) (assq 'thinking entry)))
+        (tool-call (assq 'tool_call entry))
+        (modalities (assq 'modalities entry))
+        (pricing (alist-get 'pricing entry))
+        (context (cl-loop for key in '(max_input_tokens context_length
+                                                        context_window
+                                                        inputTokenLimit)
+                          for cell = (assq key entry)
+                          when (and cell
+                                    (numberp (cdr cell))
+                                    (> (cdr cell) 0))
+                          return (cdr cell)))
+        (name (pcase provider-type
+                ('gemini (alist-get 'displayName entry))
+                (_ (or (alist-get 'name entry)
+                       (alist-get 'display_name entry)
+                       (alist-get 'displayName entry))))))
+    (when (and (stringp name)
+               (not (string-empty-p name))
+               (not (equal name (symbol-name model))))
+      (setq spec (append spec (list :description name))))
+    (when-let* ((window (gptel-model-updater-metadata--context-tokens context)))
+      (setq spec (append spec (list :context-window window))))
+    (when-let* ((cell (assq 'prompt pricing))
+                (cost (gptel-model-updater-metadata--per-token-cost (cdr cell))))
+      (setq spec (append spec (list :input-cost cost))))
+    (when-let* ((cell (assq 'completion pricing))
+                (cost (gptel-model-updater-metadata--per-token-cost (cdr cell))))
+      (setq spec (append spec (list :output-cost cost))))
+    (when reasoning
+      (push (cons 'reasoning
+                  (gptel-model-updater-metadata--truthy-p (cdr reasoning)))
+            changes))
+    (when tool-call
+      (push (cons 'tool-use
+                  (gptel-model-updater-metadata--truthy-p (cdr tool-call)))
+            changes))
+    (when modalities
+      (let* ((input (mapcar (lambda (item)
+                              (if (symbolp item) item (intern (format "%s" item))))
+                            (gptel-model-updater-metadata--sequence
+                             (alist-get 'input (cdr modalities)))))
+             (media (seq-intersection input '(image pdf audio video))))
+        (setq spec (append spec
+                           (list :set-mime-types t
+                                 :mime-types
+                                 (delete-dups
+                                  (apply #'append
+                                         (mapcar (lambda (modality)
+                                                   (alist-get modality
+                                                              gptel-model-updater-metadata--mime-types))
+                                                 input))))))
+        (push (cons 'media (and media t)) changes)))
+    (when changes
+      (setq spec (append spec (list :capability-changes (nreverse changes)))))
+    spec))
+
+(defun gptel-model-updater-metadata-apply-list
+    (models raw-index provider-type originals)
+  "Apply list metadata in RAW-INDEX onto MODELS.
+RAW-INDEX is an alist of (MODEL . ENTRY).  PROVIDER-TYPE selects name
+fields.  ORIGINALS is an alist of (MODEL . PLIST) taken before models.dev
+metadata was applied.  List fields override models.dev.  When
+`gptel-model-updater-metadata-overwrite-existing' is nil, properties already
+present in ORIGINALS are left alone.  Capability flags carried by the list
+change only those flags."
+  (dolist (model models)
+    (when-let* ((entry (alist-get model raw-index))
+                (spec (gptel-model-updater-metadata--list-spec
+                       entry model provider-type)))
+      (let ((plist (copy-sequence (symbol-plist model)))
+            (original (alist-get model originals))
+            (overwrite gptel-model-updater-metadata-overwrite-existing))
+        (dolist (key '(:description :context-window :input-cost :output-cost))
+          (when (and (plist-member spec key)
+                     (or overwrite (not (plist-member original key))))
+            (setq plist (gptel-model-updater-metadata--plist-set
+                         plist key (plist-get spec key)))))
+        (when (and (plist-get spec :set-mime-types)
+                   (or overwrite (not (plist-member original :mime-types))))
+          (setq plist (gptel-model-updater-metadata--plist-set
+                       plist :mime-types (plist-get spec :mime-types))))
+        (when (and (plist-get spec :capability-changes)
+                   (or overwrite
+                       (not (plist-member original :capabilities))))
+          (setq plist (gptel-model-updater-metadata--plist-set
+                       plist :capabilities
+                       (gptel-model-updater-metadata--adjust-capabilities
+                        (plist-get plist :capabilities)
+                        (plist-get spec :capability-changes)))))
+        (setf (symbol-plist model) plist))))
+  models)
 
 (defun gptel-model-updater-metadata-apply (models backend provider-type)
   "Apply models.dev properties to MODELS for BACKEND and PROVIDER-TYPE.

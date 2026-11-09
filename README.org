@@ -6,10 +6,15 @@
 [[https://github.com/cat-emacs/cat-emacs/actions/workflows/ci.yml][https://github.com/cat-emacs/cat-emacs/actions/workflows/ci.yml/badge.svg]]
 
 Fetch model IDs for [[https://github.com/karthink/gptel][gptel]]
-backends and write them to =gptel-backend-models=. When available, model
-metadata is loaded from [[https://models.dev][models.dev]] and applied
-as gptel model properties such as context window, cost, capabilities,
-MIME types, and knowledge cutoff.
+backends and write them to =gptel-backend-models=. When a backend spec
+names a readable =:cache= file, that raw provider response is used.
+Otherwise the provider is fetched. When available, model metadata is
+loaded from a local models.dev file or from
+[[https://models.dev][models.dev]] and applied as gptel model properties
+such as context window, cost, capabilities, MIME types, and knowledge
+cutoff. Fields the model list itself carries, such as context, price,
+reasoning, tool calling, and input modalities, override the models.dev
+values for those fields.
 
 Refreshes preserve existing gptel configuration: existing backend models
 stay in place, newly fetched models are appended, and models.dev metadata
@@ -102,8 +107,14 @@ gateway backends, configure the models.dev providers explicitly:
 #+begin_src elisp
 (setq gptel-model-updater-backends
       '(gptel--my-openai
-        (gptel--my-openrouter :providers (openrouter openai anthropic google))
+        (gptel--my-openrouter :providers (openrouter openai anthropic google)
+                              :cache "/path/to/openrouter.json")
         (gptel--my-gateway :providers (all))))
+
+=:cache= is a raw provider response, not the normalized client card.
+A missing file falls back to a live request. Set
+=gptel-model-updater-model-metadata-file= to a models.dev JSON file to
+skip fetching =gptel-model-updater-model-metadata-url=.
 #+end_src
 
 Providers are tried in order for each model. The special provider =all=
@@ -114,10 +125,13 @@ models.dev replace existing values for matching property keys.
 
 ** Options
 - =gptel-model-updater-backends=: backend variables or backend specs to
-  update; specs may include =:providers= for metadata matching.
+  update; specs may include =:providers= for metadata matching and
+  =:cache= for a raw model-list file.
+- =gptel-model-updater-model-metadata-file=: models.dev JSON file read
+  before =gptel-model-updater-model-metadata-url=. nil fetches the URL.
 - =gptel-model-updater-models=: preferred =BACKEND:MODEL= entries.
-- =gptel-model-updater-max-models=: maximum models kept after filtering,
-  default 200.
+- =gptel-model-updater-max-models=: maximum models kept after filtering.
+  nil, the default, keeps every model that passes the regexp filters.
 - =gptel-model-updater-include-model-regexp=: keep only matching model
   names.
 - =gptel-model-updater-exclude-model-regexp=: drop matching model names.
@@ -150,6 +164,7 @@ models.dev replace existing values for matching property keys.
 
 ** Providers
 - OpenAI-compatible APIs
+- Anthropic, listed at =/v1/models= with Bearer auth
 - Ollama
 - Gemini
 
